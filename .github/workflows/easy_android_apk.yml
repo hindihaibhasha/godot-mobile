@@ -1,0 +1,116 @@
+name: 📱 Build Android Editor APK (Easy Mode)
+
+# Every push builds the Godot Android editor APK (with Easy Mode).
+# Download it from the "Actions" tab (Artifacts) or from the "Releases" page.
+on:
+  push:
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: easy-apk-${{ github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  NDK_VERSION: 29.0.14206865
+
+jobs:
+  build-apk:
+    name: Android editor APK (arm64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost || true
+          df -h .
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install Android NDK
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" --install "ndk;${NDK_VERSION}" > /dev/null
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Set up Python and SCons
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      - name: Install SCons
+        run: python -m pip install scons==4.11.1 zstandard
+
+      # Makes the next builds much faster (only changed files are recompiled).
+      - name: Restore build cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .scons_cache
+          key: easy-apk-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            easy-apk-${{ github.ref_name }}-
+            easy-apk-
+
+      - name: Compile Godot editor (C++)
+        env:
+          SCONS_CACHE_LIMIT: 4096
+        run: |
+          export BUILD_NAME="easymode"
+          scons platform=android target=editor arch=arm64 production=yes lto=none \
+            accesskit=no swappy=no \
+            cache_path="${{ github.workspace }}/.scons_cache" cache_limit=4 \
+            redirect_build_objects=no -j"$(nproc)"
+          ls -l bin/
+
+      - name: Save build cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .scons_cache
+          key: easy-apk-${{ github.ref_name }}-${{ github.sha }}
+
+      - name: Build APK (Gradle)
+        run: |
+          cd platform/android/java
+          ./gradlew generateGodotEditor
+          cd ../../..
+          mkdir -p apk
+          find bin/android_editor_builds -name "*.apk" ! -name "*horizonos*" ! -name "*picoos*" -exec cp {} apk/ \;
+          cd apk
+          for f in *.apk; do mv "$f" "godot-easy-mode-${f}"; done
+          ls -l
+
+      - name: Upload APK (Actions artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-easy-mode-apk
+          path: apk/*.apk
+          retention-days: 30
+
+      - name: Publish APK to Releases
+        if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: easy-apk-latest
+          name: Godot Easy Mode APK (latest)
+          body: |
+            Latest Android editor APK, built automatically from commit ${{ github.sha }}.
+            Install the `.apk` file on your phone (allow "Install unknown apps").
+          prerelease: true
+          make_latest: true
+          files: apk/*.apk
