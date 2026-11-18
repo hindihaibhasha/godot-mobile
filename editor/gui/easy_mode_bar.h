@@ -106,6 +106,11 @@ private:
 	void _apply_map();
 	void _duplicate_selected();
 	void _init_creation_tools();
+	PopupPanel *home_popup = nullptr;
+	void _open_home();
+	void _starter(int p_kind);
+	bool choosing_logic = false;
+	void _choose_logic_object();
 
 	void _sync_layout();
 	void _open_more();

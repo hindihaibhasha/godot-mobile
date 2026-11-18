@@ -17,6 +17,7 @@
 #include "scene/gui/dialogs.h"
 #include "scene/gui/label.h"
 #include "scene/gui/option_button.h"
+#include "scene/gui/popup.h"
 #include "scene/gui/scroll_container.h"
 #include "scene/gui/spin_box.h"
 #include "scene/resources/2d/rectangle_shape_2d.h"
@@ -182,7 +183,52 @@ void EasyModeBar::_duplicate_selected() {
 	ur->commit_action();
 }
 
+void EasyModeBar::_open_home() {
+	home_popup->popup_centered_clamped(Size2(440, 580) * EDSCALE, 0.94);
+}
+
+void EasyModeBar::_starter(int p_kind) {
+	home_popup->hide();
+	_new_game(p_kind == 2);
+	_map_preset(p_kind == 0 ? 0 : 1);
+}
+
+void EasyModeBar::_choose_logic_object() {
+	_open_objects();
+	choosing_logic = true;
+}
+
 void EasyModeBar::_init_creation_tools() {
+	home_popup = memnew(PopupPanel);
+	add_child(home_popup);
+	VBoxContainer *home = memnew(VBoxContainer);
+	home_popup->add_child(home);
+	Label *welcome = memnew(Label);
+	welcome->set_text(TTR("MAKE YOUR FIRST GAME\n1. Pick a starter   2. Paint   3. Play"));
+	welcome->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
+	welcome->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+	home->add_child(welcome);
+	ScrollContainer *home_scroll = memnew(ScrollContainer);
+	home_scroll->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+	home_scroll->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
+	home->add_child(home_scroll);
+	VBoxContainer *choices = memnew(VBoxContainer);
+	choices->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	home_scroll->add_child(choices);
+	const char *starters[] = { "Jump & Collect\n2D player, platforms and coins", "Explore a Room\n2D top-down movement", "My First 3D World\nWalk around a ready-made room" };
+	for (int i = 0; i < 3; i++) {
+		Button *b = memnew(Button);
+		b->set_text(TTR(starters[i]));
+		b->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
+		b->set_custom_minimum_size(Size2(0, 80) * EDSCALE);
+		b->connect(SceneStringName(pressed), callable_mp(this, &EasyModeBar::_starter).bind(i));
+		choices->add_child(b);
+	}
+	Button *continue_button = memnew(Button);
+	continue_button->set_text(TTR("Continue current game"));
+	continue_button->set_custom_minimum_size(Size2(0, 52) * EDSCALE);
+	continue_button->connect(SceneStringName(pressed), callable_mp((Window *)home_popup, &Window::hide));
+	home->add_child(continue_button);
 	logic_editor = memnew(EasyLogicEditor);
 	add_child(logic_editor);
 	map_dialog = memnew(ConfirmationDialog);

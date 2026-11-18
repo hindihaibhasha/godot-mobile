@@ -1,4 +1,7 @@
 #include "easy_logic_editor.h"
+#include "easy_block_button.h"
+#include "scene/gui/grid_container.h"
+#include "scene/gui/margin_container.h"
 
 #include "core/object/callable_mp.h"
 #include "core/object/script_language.h"
@@ -24,6 +27,19 @@ const char *OPS[] = {
 	"Play sound / animation", "Reload level", "Go to scene file", "Spawn scene file", "Set velocity X / Y / Z",
 	"IF input held", "IF on floor", "Jump strength", "Apply gravity", "Move and slide", "Set numeric property"
 };
+bool is_section(int p_op) { return p_op == 5 || p_op == 6 || p_op == 8 || p_op == 25 || p_op == 26; }
+int category_for(int p_op) {
+	if (p_op < 5) { return 0; }
+	if (p_op <= 9 || p_op == 25 || p_op == 26) { return 1; }
+	if (p_op <= 13 || (p_op >= 24 && p_op <= 29)) { return 2; }
+	if (p_op == 14 || p_op == 15 || p_op == 30) { return 3; }
+	if (p_op <= 20) { return 4; }
+	return 5;
+}
+Color category_color(int p_category) {
+	const Color colors[] = { Color(0.48, 0.29, 0.06), Color(0.48, 0.23, 0.13), Color(0.12, 0.32, 0.60), Color(0.43, 0.19, 0.53), Color(0.12, 0.40, 0.30), Color(0.37, 0.28, 0.47) };
+	return colors[CLAMP(p_category, 0, 5)];
+}
 String quoted(const String &p_text) { return "\"" + p_text.json_escape() + "\""; }
 Button *touch_button(Container *p_parent, const String &p_text, const Callable &p_action) {
 	Button *b = memnew(Button);
@@ -63,9 +79,14 @@ void EasyLogicEditor::open_for(Node *p_node) {
 	target->clear();
 	_add_targets(EditorNode::get_singleton()->get_edited_scene(), p_node);
 	set_title(vformat(TTR("Logic blocks: %s"), p_node->get_name()));
-	status->set_text(TTR("Add an event, then actions. IF / REPEAT sections need END. Apply saves blocks into this scene."));
+	status->set_text(TTR("Choose a category. Drag a block to a + slot, or tap + then a block. Tap a placed block to change its values."));
+	undo_stack.clear();
+	redo_stack.clear();
+	insert_at = -1;
+	palette_panel->show();
+	_category(0);
 	_refresh();
-	popup_centered_clamped(Size2(540, 640) * EDSCALE, 0.94);
+	popup_centered_clamped(Size2(680, 720) * EDSCALE, 0.97);
 }
 
 void EasyLogicEditor::_refresh() {
@@ -75,32 +96,177 @@ void EasyLogicEditor::_refresh() {
 		c->queue_free();
 	}
 	int depth = 0;
-	for (int i = 0; i < program.size(); i++) {
+	for (int i = 0; i <= program.size(); i++) {
+		_add_slot(i, depth);
+		if (i == program.size()) { break; }
 		Dictionary d = program[i];
 		int op = d.get("op", 0);
 		if (op < 0 || op >= (int)std_size(OPS)) { continue; }
 		if (op < 5) { depth = 0; }
 		if (op == 9 || op == 7) { depth = MAX(0, depth - 1); }
-		HBoxContainer *row = memnew(HBoxContainer);
+		MarginContainer *row = memnew(MarginContainer);
+		row->add_theme_constant_override("margin_left", MIN(depth, 6) * 16 * EDSCALE);
 		stack->add_child(row);
-		String caption = String("  ").repeat(MIN(depth, 5)) + TTR(OPS[op]);
-		caption += "\n" + String(d.get("target", ".")) + "  " + String(d.get("text", ""));
-		caption += "  " + String::num(double(d.get("x", 0))) + ", " + String::num(double(d.get("y", 0))) + ", " + String::num(double(d.get("z", 0)));
-		Button *card = touch_button(row, caption, callable_mp(this, &EasyLogicEditor::_edit_block).bind(i));
-		card->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
-		card->set_text_alignment(HORIZONTAL_ALIGNMENT_LEFT);
-		Ref<StyleBoxFlat> style;
-		style.instantiate();
-		style->set_bg_color(op < 5 ? Color(0.22, 0.16, 0.40) : ((op <= 9 || op == 25 || op == 26) ? Color(0.35, 0.23, 0.08) : Color(0.08, 0.28, 0.30)));
-		style->set_corner_radius_all(8 * EDSCALE);
-		style->set_content_margin_all(8 * EDSCALE);
-		card->add_theme_style_override("normal", style);
-		touch_button(row, "↑", callable_mp(this, &EasyLogicEditor::_move_block).bind(i, -1))->set_h_size_flags(Control::SIZE_SHRINK_CENTER);
-		touch_button(row, "↓", callable_mp(this, &EasyLogicEditor::_move_block).bind(i, 1))->set_h_size_flags(Control::SIZE_SHRINK_CENTER);
-		touch_button(row, "×", callable_mp(this, &EasyLogicEditor::_remove_block).bind(i))->set_h_size_flags(Control::SIZE_SHRINK_CENTER);
-		if (op < 5 || op == 5 || op == 6 || op == 7 || op == 8 || op == 25 || op == 26) { depth++; }
+		if (op == 9) {
+			Label *end = memnew(Label);
+			end->set_text(TTR("└ end"));
+			end->add_theme_color_override("font_color", category_color(1).lightened(0.5));
+			row->add_child(end);
+			continue;
+		}
+		String caption = TTR(OPS[op]);
+		if (op >= 3 && op != 7) {
+			String path = d.get("target", ".");
+			caption += "\n[ " + (path == "." ? TTR("This object") : path.get_file()) + " ]";
+			String words = d.get("text", "");
+			if (!words.is_empty()) { caption += "  [ " + words + " ]"; }
+			if (op != 3 && op != 16 && op != 17 && op != 18 && op != 19 && op != 20 && op != 21 && op != 22 && op != 25 && op != 26 && op != 29) {
+				caption += "  [ " + String::num(double(d.get("x", 0))) + " ]";
+			}
+		}
+		EasyBlockButton *card = memnew(EasyBlockButton);
+		card->setup(category_color(category_for(op)), op < 5);
+		card->set_text(caption);
+		card->set_meta("block_index", i);
+		card->connect(SceneStringName(pressed), callable_mp(this, &EasyLogicEditor::_edit_block).bind(i));
+		card->set_drag_forwarding(callable_mp(this, &EasyLogicEditor::_drag).bind(card), Callable(), Callable());
+		row->add_child(card);
+		if (op < 5 || is_section(op) || op == 7) { depth++; }
 	}
 }
+
+void EasyLogicEditor::_remember() {
+	undo_stack.push_back(program.duplicate(true));
+	if (undo_stack.size() > 60) { undo_stack.remove_at(0); }
+	redo_stack.clear();
+}
+
+void EasyLogicEditor::_history(bool p_redo) {
+	Vector<Array> &from = p_redo ? redo_stack : undo_stack;
+	Vector<Array> &to = p_redo ? undo_stack : redo_stack;
+	if (from.is_empty()) { return; }
+	to.push_back(program.duplicate(true));
+	program = from[from.size() - 1].duplicate(true);
+	from.resize(from.size() - 1);
+	insert_at = -1;
+	_refresh();
+}
+
+int EasyLogicEditor::_span_end(int p_index) const {
+	Dictionary d = program[p_index];
+	int op = d.get("op", 0);
+	if (op < 5) {
+		int end = p_index + 1;
+		while (end < program.size() && int(Dictionary(program[end]).get("op", 0)) >= 5) { end++; }
+		return end;
+	}
+	if (!is_section(op)) { return p_index + 1; }
+	int depth = 1;
+	for (int i = p_index + 1; i < program.size(); i++) {
+		int next = Dictionary(program[i]).get("op", 0);
+		if (is_section(next)) { depth++; }
+		if (next == 9 && --depth == 0) { return i + 1; }
+		if (next < 5) { return i; }
+	}
+	return program.size();
+}
+
+void EasyLogicEditor::_category(int p_category) {
+	for (int i = palette->get_child_count() - 1; i >= 0; i--) {
+		Node *c = palette->get_child(i); palette->remove_child(c); c->queue_free();
+	}
+	for (int op = 0; op < (int)std_size(OPS); op++) {
+		if (op == 9 || category_for(op) != p_category) { continue; }
+		EasyBlockButton *b = memnew(EasyBlockButton);
+		b->setup(category_color(p_category), op < 5);
+		b->set_text(TTR(OPS[op]));
+		b->set_meta("palette_op", op);
+		b->connect(SceneStringName(pressed), callable_mp(this, &EasyLogicEditor::_insert).bind(op, -1));
+		b->set_drag_forwarding(callable_mp(this, &EasyLogicEditor::_drag).bind(b), Callable(), Callable());
+		palette->add_child(b);
+	}
+}
+
+void EasyLogicEditor::_toggle_palette() { palette_panel->set_visible(!palette_panel->is_visible()); }
+void EasyLogicEditor::_slot_pressed(int p_at) {
+	insert_at = p_at;
+	palette_panel->show();
+	status->set_text(TTR("Now tap a block in the drawer to connect it here."));
+}
+
+void EasyLogicEditor::_add_slot(int p_at, int p_depth) {
+	Button *slot = touch_button(stack, p_at == 0 ? TTR("+ Event / drop here") : TTR("+ Connect block here"), callable_mp(this, &EasyLogicEditor::_slot_pressed).bind(p_at));
+	slot->set_custom_minimum_size(Size2(0, 36) * EDSCALE);
+	slot->set_flat(true);
+	slot->set_meta("slot", p_at);
+	slot->set_tooltip_text(TTR("Drag a block here. IF and REPEAT move together with their contents."));
+	slot->set_drag_forwarding(Callable(), callable_mp(this, &EasyLogicEditor::_can_drop).bind(slot), callable_mp(this, &EasyLogicEditor::_drop).bind(slot));
+}
+
+Variant EasyLogicEditor::_drag(const Vector2 &p_position, Control *p_source) {
+	Dictionary payload;
+	payload["editor"] = uint64_t(get_instance_id());
+	payload["index"] = p_source->get_meta("block_index", -1);
+	payload["op"] = p_source->get_meta("palette_op", -1);
+	Label *preview = memnew(Label);
+	preview->set_text(Object::cast_to<Button>(p_source)->get_text());
+	preview->set_modulate(Color(1, 0.85, 0.4));
+	p_source->set_drag_preview(preview);
+	return payload;
+}
+
+bool EasyLogicEditor::_can_drop(const Vector2 &p_position, const Variant &p_data, Control *p_slot) const {
+	if (p_data.get_type() != Variant::DICTIONARY) { return false; }
+	Dictionary data = p_data;
+	if (uint64_t(data.get("editor", 0)) != uint64_t(get_instance_id())) { return false; }
+	int from = data.get("index", -1), op = data.get("op", -1);
+	int at = p_slot->get_meta("slot", -1);
+	if (at < 0 || at > program.size()) { return false; }
+	if (from >= 0) {
+		if (from >= program.size() || (at >= from && at <= _span_end(from))) { return false; }
+		op = Dictionary(program[from]).get("op", -1);
+	}
+	return op >= 0 && op < (int)std_size(OPS) && op != 9;
+}
+
+void EasyLogicEditor::_drop(const Vector2 &p_position, const Variant &p_data, Control *p_slot) {
+	if (!_can_drop(p_position, p_data, p_slot)) { return; }
+	Dictionary data = p_data;
+	int at = p_slot->get_meta("slot"), from = data.get("index", -1);
+	if (from < 0) { _insert(data["op"], at); return; }
+	Array before = program.duplicate(true);
+	int end = _span_end(from);
+	Array moving;
+	for (int i = from; i < end; i++) { moving.push_back(program[i]); }
+	for (int i = from; i < end; i++) { program.remove_at(from); }
+	if (at > from) { at -= end - from; }
+	for (int i = 0; i < moving.size(); i++) { program.insert(at + i, moving[i]); }
+	String error; _compile(error);
+	if (!error.is_empty()) { program = before; status->set_text(TTR("That connection does not fit. Put events outside IF / REPEAT and actions inside an event.")); return; }
+	undo_stack.push_back(before); redo_stack.clear();
+	insert_at = -1;
+	callable_mp(this, &EasyLogicEditor::_refresh).call_deferred();
+}
+
+void EasyLogicEditor::_insert(int p_op, int p_at) {
+	if (p_at < 0) { p_at = insert_at < 0 ? program.size() : insert_at; }
+	p_at = CLAMP(p_at, 0, program.size());
+	Array before = program.duplicate(true);
+	Dictionary d;
+	d["op"] = p_op; d["target"] = "."; d["text"] = (p_op == 5 || p_op == 6 || p_op == 14 || p_op == 15) ? "score" : p_op == 25 ? "ui_accept" : "";
+	d["x"] = p_op == 8 ? 3 : p_op == 11 ? 100 : 1;
+	if (program.is_empty() && p_op >= 5) { Dictionary event; event["op"] = 0; program.push_back(event); p_at = 1; }
+	program.insert(p_at, d);
+	if (is_section(p_op)) { Dictionary end; end["op"] = 9; program.insert(p_at + 1, end); }
+	String error; _compile(error);
+	if (!error.is_empty()) { program = before; status->set_text(TTR("This block does not fit here. Choose a + slot inside an event; ELSE belongs inside IF.")); return; }
+	undo_stack.push_back(before); redo_stack.clear();
+	insert_at = is_section(p_op) ? p_at + 1 : -1;
+	status->set_text(is_section(p_op) ? TTR("Section connected. The next block goes inside it; the end is automatic.") : TTR("Connected! Tap the block to set its values. Save logic when ready."));
+	callable_mp(this, &EasyLogicEditor::_refresh).call_deferred();
+}
+
+void EasyLogicEditor::_delete_editing() { _remove_block(editing); block_dialog->hide(); }
 
 void EasyLogicEditor::_edit_block(int p_index) {
 	editing = p_index;
@@ -114,6 +280,7 @@ void EasyLogicEditor::_edit_block(int p_index) {
 		if (target->get_item_metadata(i) == d.get("target", ".")) { target->select(i); break; }
 	}
 	_operation_changed(operation->get_selected());
+	block_dialog->set_title(TTR(OPS[operation->get_selected()]));
 	block_dialog->popup_centered_clamped(Size2(420, 430) * EDSCALE, 0.93);
 }
 
@@ -130,6 +297,13 @@ void EasyLogicEditor::_operation_changed(int p_index) {
 	if (p_index == 27 || p_index == 28) { help = TTR("Select a CharacterBody. X = positive jump strength or gravity. Use Move and slide afterwards. Do not combine with an existing movement script."); }
 	if (p_index == 30) { help = TTR("Text = numeric property name (e.g. speed, energy). X = new value. The property must exist on the target."); }
 	field_help->set_text(help);
+	const bool vector = (p_index >= 10 && p_index <= 13) || p_index == 23 || p_index == 24;
+	const bool scalar = vector || p_index == 4 || p_index == 5 || p_index == 6 || p_index == 8 || p_index == 14 || p_index == 15 || p_index == 27 || p_index == 28 || p_index == 30;
+	const bool words = p_index == 5 || p_index == 6 || p_index == 14 || p_index == 15 || p_index == 19 || p_index == 20 || p_index == 22 || p_index == 23 || p_index == 25 || p_index == 30;
+	text->set_visible(words);
+	text->set_placeholder((p_index == 5 || p_index == 6 || p_index == 14 || p_index == 15) ? TTR("Variable name, e.g. score") : p_index == 19 ? TTR("Message to display") : TTR("Name or scene path"));
+	target->set_visible(p_index == 3 || vector || (p_index >= 16 && p_index <= 20) || (p_index >= 26 && p_index <= 30));
+	for (int i = 0; i < 3; i++) { Object::cast_to<Control>(numbers[i]->get_parent())->set_visible(i == 0 ? scalar : vector); }
 }
 
 void EasyLogicEditor::_store_block() {
@@ -139,6 +313,7 @@ void EasyLogicEditor::_store_block() {
 	d["text"] = text->get_text();
 	d["target"] = target->get_selected_metadata();
 	d["x"] = numbers[0]->get_value(); d["y"] = numbers[1]->get_value(); d["z"] = numbers[2]->get_value();
+	_remember();
 	if (editing < 0) { program.push_back(d); } else { program[editing] = d; }
 	_refresh();
 }
@@ -149,7 +324,14 @@ void EasyLogicEditor::_move_block(int p_index, int p_direction) {
 	Variant item = program[p_index]; program[p_index] = program[to]; program[to] = item;
 	_refresh();
 }
-void EasyLogicEditor::_remove_block(int p_index) { program.remove_at(p_index); _refresh(); }
+void EasyLogicEditor::_remove_block(int p_index) {
+	if (p_index < 0 || p_index >= program.size()) { return; }
+	_remember();
+	int end = _span_end(p_index);
+	for (int i = p_index; i < end; i++) { program.remove_at(p_index); }
+	insert_at = -1;
+	_refresh();
+}
 
 String EasyLogicEditor::_compile(String &r_error) const {
 	String functions, ready, physics, input;
@@ -333,6 +515,7 @@ void EasyLogicEditor::_apply() {
 
 void EasyLogicEditor::_preset(int p_index) {
 	// Append a complete independent event, preserving existing user blocks.
+	_remember();
 	Dictionary event;
 	event["op"] = p_index == 0 ? 1 : 2;
 	program.push_back(event);
@@ -357,9 +540,32 @@ EasyLogicEditor::EasyLogicEditor() {
 	vb->add_child(status);
 	HBoxContainer *tools = memnew(HBoxContainer);
 	vb->add_child(tools);
-	touch_button(tools, TTR("+ Block"), callable_mp(this, &EasyLogicEditor::_edit_block).bind(-1));
-	touch_button(tools, TTR("Move preset"), callable_mp(this, &EasyLogicEditor::_preset).bind(0));
-	touch_button(tools, TTR("Tap score"), callable_mp(this, &EasyLogicEditor::_preset).bind(1));
+	touch_button(tools, TTR("Blocks drawer"), callable_mp(this, &EasyLogicEditor::_toggle_palette));
+	touch_button(tools, TTR("Undo"), callable_mp(this, &EasyLogicEditor::_history).bind(false));
+	touch_button(tools, TTR("Redo"), callable_mp(this, &EasyLogicEditor::_history).bind(true));
+	VBoxContainer *drawer = memnew(VBoxContainer);
+	palette_panel = drawer;
+	vb->add_child(drawer);
+	GridContainer *categories = memnew(GridContainer);
+	categories->set_columns(3);
+	drawer->add_child(categories);
+	const char *names[] = { "Events", "Control", "Movement", "Variables", "Looks / Sound", "Scenes" };
+	for (int i = 0; i < 6; i++) {
+		Button *b = touch_button(categories, TTR(names[i]), callable_mp(this, &EasyLogicEditor::_category).bind(i));
+		Ref<StyleBoxFlat> style; style.instantiate(); style->set_bg_color(category_color(i)); style->set_content_margin_all(8 * EDSCALE);
+		b->add_theme_style_override("normal", style);
+	}
+	ScrollContainer *drawer_scroll = memnew(ScrollContainer);
+	drawer_scroll->set_custom_minimum_size(Size2(0, 140) * EDSCALE);
+	drawer_scroll->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
+	drawer->add_child(drawer_scroll);
+	palette = memnew(VBoxContainer);
+	palette->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	drawer_scroll->add_child(palette);
+	HBoxContainer *examples = memnew(HBoxContainer);
+	drawer->add_child(examples);
+	touch_button(examples, TTR("Example: move"), callable_mp(this, &EasyLogicEditor::_preset).bind(0));
+	touch_button(examples, TTR("Example: tap score"), callable_mp(this, &EasyLogicEditor::_preset).bind(1));
 	ScrollContainer *scroll = memnew(ScrollContainer);
 	scroll->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
 	scroll->set_v_size_flags(Control::SIZE_EXPAND_FILL);
@@ -380,6 +586,8 @@ EasyLogicEditor::EasyLogicEditor() {
 	for (const char *op : OPS) { operation->add_item(TTR(op)); }
 	operation->connect(SceneStringName(item_selected), callable_mp(this, &EasyLogicEditor::_operation_changed));
 	form->add_child(operation);
+	operation->hide();
+	block_dialog->add_button(TTR("Delete block / section"))->connect(SceneStringName(pressed), callable_mp(this, &EasyLogicEditor::_delete_editing));
 	target = memnew(OptionButton);
 	target->set_fit_to_longest_item(false);
 	target->set_custom_minimum_size(Size2(0, 48) * EDSCALE);

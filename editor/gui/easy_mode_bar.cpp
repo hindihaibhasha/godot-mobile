@@ -440,13 +440,16 @@ void EasyModeBar::_append_objects(Node *p_node, int p_depth) {
 	objects_list->add_child(b);
 	for (int i = 0; i < p_node->get_child_count(); i++) {
 		Node *child = p_node->get_child(i);
-		if (child->get_owner() == _get_root()) {
+		if (child->get_owner() == _get_root() && !child->has_meta("easy_logic_program") &&
+				!Object::cast_to<CollisionShape2D>(child) && !Object::cast_to<CollisionShape3D>(child) &&
+				!Object::cast_to<Polygon2D>(child) && !Object::cast_to<MeshInstance3D>(child)) {
 			_append_objects(child, p_depth + 1);
 		}
 	}
 }
 
 void EasyModeBar::_open_objects() {
+	choosing_logic = false;
 	for (int i = objects_list->get_child_count() - 1; i >= 0; i--) {
 		memdelete(objects_list->get_child(i));
 	}
@@ -471,6 +474,7 @@ void EasyModeBar::_select_object(ObjectID p_id) {
 	objects_popup->hide();
 	_back_to_scene();
 	_update_state();
+	if (choosing_logic) { choosing_logic = false; _open_blocks(); }
 }
 
 void EasyModeBar::_open_properties() {
@@ -586,25 +590,26 @@ void EasyModeBar::_update_state() {
 
 	bool has_player = false;
 	if (has_scene) {
-		for (int i = 0; i < root->get_child_count(); i++) {
-			Node *c = root->get_child(i);
-			if (Object::cast_to<CharacterBody2D>(c) || Object::cast_to<CharacterBody3D>(c)) {
-				has_player = true;
-				break;
-			}
+		List<Node *> pending;
+		pending.push_back(root);
+		while (!pending.is_empty()) {
+			Node *c = pending.front()->get();
+			pending.pop_front();
+			if (Object::cast_to<CharacterBody2D>(c) || Object::cast_to<CharacterBody3D>(c)) { has_player = true; break; }
+			for (int i = 0; i < c->get_child_count(); i++) { pending.push_back(c->get_child(i)); }
 		}
 	}
 
 	String hint;
 	if (!has_scene) {
-		hint = TTR("START HERE: More > New 2D or New 3D");
+		hint = TTR("Start here: Home > choose a game");
 	} else if (!has_player) {
-		hint = TTR("Step 2: Tap \"Add\" and pick a Player. Then add Ground, Boxes and Coins.");
+		hint = TTR("Next: Map > paint a Player > Build map");
 	} else if (root->get_scene_file_path().is_empty()) {
 		hint = TTR("Step 3: Tap \"Play\" to try your game! (It is saved automatically.)");
 	} else {
 		List<Node *> selection = EditorNode::get_singleton()->get_editor_selection()->get_top_selected_node_list();
-		hint = selection.is_empty() ? TTR("Objects: select  |  More: edit, code, save") : vformat(TTR("%s selected  |  More > Edit or Blocks"), selection.front()->get()->get_name());
+		hint = selection.is_empty() ? TTR("Map: design   Logic: connect blocks   Play: try it") : vformat(TTR("%s selected  |  Logic or Tools > Edit"), selection.front()->get()->get_name());
 	}
 	if (hint_label->get_text() != hint) {
 		hint_label->set_text(hint);
@@ -1234,11 +1239,11 @@ EasyModeBar::EasyModeBar() {
 	nav->set_h_size_flags(SIZE_EXPAND_FILL);
 	vb->add_child(nav);
 	buttons_box = nav;
-	_make_button(TTR("Scene"), SNAME("Node2D"), callable_mp(this, &EasyModeBar::_back_to_scene));
-	objects_button = _make_button(TTR("Objects"), SNAME("Node"), callable_mp(this, &EasyModeBar::_open_objects));
-	add_button = _make_button(TTR("Add"), SNAME("Add"), callable_mp(this, &EasyModeBar::_open_add_popup));
+	_make_button(TTR("Home"), SNAME("Node"), callable_mp(this, &EasyModeBar::_open_home));
+	_make_button(TTR("Map"), SNAME("Node2D"), callable_mp(this, &EasyModeBar::_open_map));
+	code_button = _make_button(TTR("Logic"), SNAME("Script"), callable_mp(this, &EasyModeBar::_choose_logic_object));
 	play_button = _make_button(TTR("Play"), SNAME("Play"), callable_mp(this, &EasyModeBar::_play));
-	_make_button(TTR("More"), SNAME("GuiTabMenuHl"), callable_mp(this, &EasyModeBar::_open_more));
+	_make_button(TTR("Tools"), SNAME("GuiTabMenuHl"), callable_mp(this, &EasyModeBar::_open_more));
 
 	more_popup = memnew(PopupPanel);
 	add_child(more_popup);
@@ -1260,8 +1265,9 @@ EasyModeBar::EasyModeBar() {
 	new_2d_button = _make_button(TTR("New 2D"), SNAME("Node2D"), callable_mp(this, &EasyModeBar::_new_game).bind(false));
 	new_3d_button = _make_button(TTR("New 3D"), SNAME("Node3D"), callable_mp(this, &EasyModeBar::_new_game).bind(true));
 	properties_button = _make_button(TTR("Edit"), SNAME("Edit"), callable_mp(this, &EasyModeBar::_open_properties));
-	code_button = _make_button(TTR("Blocks"), SNAME("Script"), callable_mp(this, &EasyModeBar::_open_blocks));
-	_make_button(TTR("Map"), SNAME("Node2D"), callable_mp(this, &EasyModeBar::_open_map));
+	objects_button = _make_button(TTR("Objects"), SNAME("Node"), callable_mp(this, &EasyModeBar::_open_objects));
+	add_button = _make_button(TTR("Add object"), SNAME("Add"), callable_mp(this, &EasyModeBar::_open_add_popup));
+	_make_button(TTR("Canvas"), SNAME("Node2D"), callable_mp(this, &EasyModeBar::_back_to_scene));
 	_make_button(TTR("Duplicate"), SNAME("Duplicate"), callable_mp(this, &EasyModeBar::_duplicate_selected));
 	delete_button = _make_button(TTR("Delete"), SNAME("Remove"), callable_mp(this, &EasyModeBar::_request_delete));
 	undo_button = _make_button(TTR("Undo"), SNAME("UndoRedo"), callable_mp(this, &EasyModeBar::_undo));
