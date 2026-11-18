@@ -604,7 +604,7 @@ void EasyModeBar::_update_state() {
 		hint = TTR("Step 3: Tap \"Play\" to try your game! (It is saved automatically.)");
 	} else {
 		List<Node *> selection = EditorNode::get_singleton()->get_editor_selection()->get_top_selected_node_list();
-		hint = selection.is_empty() ? TTR("Objects: select  |  More: edit, code, save") : vformat(TTR("%s selected  |  More > Edit or Code"), selection.front()->get()->get_name());
+		hint = selection.is_empty() ? TTR("Objects: select  |  More: edit, code, save") : vformat(TTR("%s selected  |  More > Edit or Blocks"), selection.front()->get()->get_name());
 	}
 	if (hint_label->get_text() != hint) {
 		hint_label->set_text(hint);
@@ -678,13 +678,10 @@ void EasyModeBar::_new_game(bool p_3d) {
 	en->edit_node(root);
 	_focus_main_screen(p_3d ? "3D" : "2D");
 
-	// A game without ground is not much fun: add one right away.
-	_add_object(p_3d ? OBJ_3D_FLOOR : OBJ_2D_GROUND);
-	if (!p_3d && CanvasItemEditor::get_singleton()) {
-		// Zoom so the whole game screen (and the ground) is visible.
-		callable_mp(CanvasItemEditor::get_singleton(), &CanvasItemEditor::frame_selection).call_deferred();
-	}
+	// Start with the visual level builder instead of a blank scene workflow.
 	_update_state();
+	_open_map();
+	_map_preset(p_3d ? 1 : 0);
 }
 
 void EasyModeBar::_open_add_popup() {
@@ -1263,7 +1260,9 @@ EasyModeBar::EasyModeBar() {
 	new_2d_button = _make_button(TTR("New 2D"), SNAME("Node2D"), callable_mp(this, &EasyModeBar::_new_game).bind(false));
 	new_3d_button = _make_button(TTR("New 3D"), SNAME("Node3D"), callable_mp(this, &EasyModeBar::_new_game).bind(true));
 	properties_button = _make_button(TTR("Edit"), SNAME("Edit"), callable_mp(this, &EasyModeBar::_open_properties));
-	code_button = _make_button(TTR("Code"), SNAME("Script"), callable_mp(this, &EasyModeBar::_open_code));
+	code_button = _make_button(TTR("Blocks"), SNAME("Script"), callable_mp(this, &EasyModeBar::_open_blocks));
+	_make_button(TTR("Map"), SNAME("Node2D"), callable_mp(this, &EasyModeBar::_open_map));
+	_make_button(TTR("Duplicate"), SNAME("Duplicate"), callable_mp(this, &EasyModeBar::_duplicate_selected));
 	delete_button = _make_button(TTR("Delete"), SNAME("Remove"), callable_mp(this, &EasyModeBar::_request_delete));
 	undo_button = _make_button(TTR("Undo"), SNAME("UndoRedo"), callable_mp(this, &EasyModeBar::_undo));
 	redo_button = _make_button(TTR("Redo"), SNAME("Redo"), callable_mp(this, &EasyModeBar::_redo));
@@ -1276,7 +1275,7 @@ EasyModeBar::EasyModeBar() {
 	}
 
 	add_button->set_tooltip_text(TTR("Add an object (player, ground, box, coin...) to your game."));
-	code_button->set_tooltip_text(TTR("Write code for the selected object."));
+	code_button->set_tooltip_text(TTR("Build behavior with visual blocks for the selected object."));
 	play_button->set_tooltip_text(TTR("Save and play your game."));
 
 	show_button = memnew(Button);
@@ -1392,7 +1391,7 @@ EasyModeBar::EasyModeBar() {
 			"3. Tap \"Play\" to try your game. It is saved automatically.\n"
 			"4. Tap an object to select it. Drag it with your finger to move it.\n"
 			"   Or tap Objects to choose it from a large, scrollable list.\n"
-			"5. More > Edit changes position and size. More > Code opens its script.\n"
+			"5. More > Edit changes position and size. More > Blocks creates behavior.\n"
 			"6. More > Undo fixes mistakes. Scene returns to your canvas.\n"
 			"7. More > Full editor opens advanced tools and project settings.\n\n"
 			"Controls in your game on the phone:\n"
@@ -1406,4 +1405,5 @@ EasyModeBar::EasyModeBar() {
 	message_dialog->set_title(TTR("Easy Mode"));
 	message_dialog->set_autowrap(true);
 	add_child(message_dialog);
+	_init_creation_tools();
 }

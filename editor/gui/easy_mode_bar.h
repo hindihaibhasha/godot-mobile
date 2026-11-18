@@ -43,6 +43,9 @@ class Node;
 class PopupPanel;
 class Script;
 class VBoxContainer;
+class EasyLogicEditor;
+class EasyMapCanvas;
+class OptionButton;
 
 // "Easy Mode": a big-button, beginner friendly toolbar shown at the bottom of
 // the editor. It is designed for small phone screens: every common action
@@ -90,6 +93,19 @@ private:
 	ObjectID property_target;
 	ObjectID property_root;
 	bool mobile_layout = false;
+	EasyLogicEditor *logic_editor = nullptr;
+	ConfirmationDialog *map_dialog = nullptr;
+	EasyMapCanvas *map_canvas = nullptr;
+	OptionButton *map_mode = nullptr;
+	SpinBox *map_cell_size = nullptr;
+	ObjectID map_root;
+	void _open_blocks();
+	void _open_map();
+	void _map_brush(int p_index);
+	void _map_preset(int p_index);
+	void _apply_map();
+	void _duplicate_selected();
+	void _init_creation_tools();
 
 	void _sync_layout();
 	void _open_more();
