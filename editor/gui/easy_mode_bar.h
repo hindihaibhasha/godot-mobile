@@ -35,6 +35,9 @@
 class AcceptDialog;
 class Button;
 class HBoxContainer;
+class GridContainer;
+class ConfirmationDialog;
+class SpinBox;
 class Label;
 class Node;
 class PopupPanel;
@@ -72,8 +75,31 @@ public:
 
 private:
 	VBoxContainer *main_vb = nullptr;
-	HBoxContainer *buttons_box = nullptr;
+	Container *buttons_box = nullptr;
+	Vector<Button *> action_buttons;
 	Label *hint_label = nullptr;
+	Button *objects_button = nullptr;
+	Button *properties_button = nullptr;
+	PopupPanel *more_popup = nullptr;
+	PopupPanel *objects_popup = nullptr;
+	VBoxContainer *objects_list = nullptr;
+	ConfirmationDialog *properties_dialog = nullptr;
+	ConfirmationDialog *delete_dialog = nullptr;
+	SpinBox *position_fields[3] = {};
+	SpinBox *scale_fields[3] = {};
+	ObjectID property_target;
+	ObjectID property_root;
+	bool mobile_layout = false;
+
+	void _sync_layout();
+	void _open_more();
+	void _open_objects();
+	void _append_objects(Node *p_node, int p_depth);
+	void _select_object(ObjectID p_id);
+	void _open_properties();
+	void _apply_properties();
+	void _request_delete();
+	void _back_to_scene();
 
 	Button *new_2d_button = nullptr;
 	Button *new_3d_button = nullptr;

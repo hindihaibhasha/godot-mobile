@@ -7032,7 +7032,23 @@ void EditorNode::update_distraction_free_mode() {
 	}
 }
 
+void EditorNode::set_easy_workspace(bool p_enabled) {
+	if (easy_workspace == p_enabled) {
+		return;
+	}
+	if (p_enabled) {
+		easy_previous_distraction = is_distraction_free_mode_enabled();
+		easy_previous_title = title_bar->is_visible();
+		easy_previous_tabs = scene_tabs->is_visible();
+	}
+	easy_workspace = p_enabled;
+	title_bar->set_visible(p_enabled ? false : easy_previous_title);
+	scene_tabs->set_visible(p_enabled ? false : easy_previous_tabs);
+	set_distraction_free_mode(p_enabled ? true : easy_previous_distraction);
+}
+
 void EditorNode::set_distraction_free_mode(bool p_enter) {
+	p_enter = p_enter || easy_workspace;
 	distraction_free->set_pressed(p_enter);
 
 	if (p_enter) {

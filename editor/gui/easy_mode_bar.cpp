@@ -71,10 +71,12 @@
 #include "scene/gui/box_container.h"
 #include "scene/gui/button.h"
 #include "scene/gui/dialogs.h"
+#include "scene/gui/grid_container.h"
 #include "scene/gui/label.h"
 #include "scene/gui/popup.h"
 #include "scene/gui/scroll_container.h"
 #include "scene/gui/separator.h"
+#include "scene/gui/spin_box.h"
 #include "scene/resources/2d/circle_shape_2d.h"
 #include "scene/resources/2d/rectangle_shape_2d.h"
 #include "scene/resources/3d/box_shape_3d.h"
@@ -85,6 +87,7 @@
 #include "scene/resources/environment.h"
 #include "scene/resources/material.h"
 #include "scene/resources/sky.h"
+#include "scene/resources/style_box_flat.h"
 #include "servers/display/display_server.h"
 
 // ---------------------------------------------------------------------------
@@ -373,19 +376,32 @@ Button *EasyModeBar::_make_button(const String &p_text, const StringName &p_icon
 	b->set_vertical_icon_alignment(VERTICAL_ALIGNMENT_TOP);
 	b->set_expand_icon(false);
 	b->connect(SceneStringName(pressed), p_callable);
+	b->set_h_size_flags(SIZE_EXPAND_FILL);
+	b->set_clip_text(true);
 	buttons_box->add_child(b);
+	action_buttons.push_back(b);
 	return b;
 }
 
 void EasyModeBar::_apply_sizes() {
-	// Big, finger friendly buttons. EDSCALE already follows the screen density.
-	const Size2 button_size = Size2(64, 56) * EDSCALE;
-	for (int i = 0; i < buttons_box->get_child_count(); i++) {
-		Button *b = Object::cast_to<Button>(buttons_box->get_child(i));
-		if (!b) {
-			continue;
-		}
+	// Five equal-width actions fit without sideways scrolling on phones.
+	const Size2 button_size = Size2(48, 56) * EDSCALE;
+	for (Button *b : action_buttons) {
 		b->set_custom_minimum_size(button_size);
+		for (const String &state : { String("normal"), String("hover"), String("pressed") }) {
+			Ref<StyleBoxFlat> tile;
+			tile.instantiate();
+			Color color = get_theme_color(SNAME("dark_color_2"), SNAME("Editor"));
+			if (b == play_button || state == "pressed") {
+				color = get_theme_color(SNAME("accent_color"), SNAME("Editor")).darkened(0.55);
+			} else if (state == "hover") {
+				color = color.lightened(0.12);
+			}
+			tile->set_bg_color(color);
+			tile->set_corner_radius_all(10 * EDSCALE);
+			tile->set_content_margin_all(6 * EDSCALE);
+			b->add_theme_style_override(state, tile);
+		}
 		b->add_theme_font_size_override(SceneStringName(font_size), 13 * EDSCALE);
 		b->add_theme_constant_override("icon_max_width", 22 * EDSCALE);
 		if (b->has_meta("easy_icon")) {
@@ -395,6 +411,132 @@ void EasyModeBar::_apply_sizes() {
 	show_button->set_custom_minimum_size(Size2(0, 40) * EDSCALE);
 	show_button->set_button_icon(get_editor_theme_icon(SNAME("GuiVisibilityVisible")));
 	hint_label->add_theme_font_size_override(SceneStringName(font_size), 14 * EDSCALE);
+}
+
+void EasyModeBar::_sync_layout() {
+	const bool enabled = is_visible() && !collapsed;
+	if (enabled != mobile_layout) {
+		mobile_layout = enabled;
+		EditorNode::get_singleton()->set_easy_workspace(enabled);
+	}
+}
+
+void EasyModeBar::_open_more() {
+	more_popup->popup_centered_clamped(Size2(360, 360) * EDSCALE, 0.92);
+}
+
+void EasyModeBar::_back_to_scene() {
+	_focus_main_screen(_is_3d_scene() ? "3D" : "2D");
+}
+
+void EasyModeBar::_append_objects(Node *p_node, int p_depth) {
+	Button *b = memnew(Button);
+	b->set_text(String("  ").repeat(MIN(p_depth, 4)) + String(p_node->get_name()));
+	b->set_clip_text(true);
+	b->set_text_alignment(HORIZONTAL_ALIGNMENT_LEFT);
+	b->set_custom_minimum_size(Size2(0, 52) * EDSCALE);
+	b->add_theme_font_size_override(SceneStringName(font_size), 16 * EDSCALE);
+	b->connect(SceneStringName(pressed), callable_mp(this, &EasyModeBar::_select_object).bind(p_node->get_instance_id()));
+	objects_list->add_child(b);
+	for (int i = 0; i < p_node->get_child_count(); i++) {
+		Node *child = p_node->get_child(i);
+		if (child->get_owner() == _get_root()) {
+			_append_objects(child, p_depth + 1);
+		}
+	}
+}
+
+void EasyModeBar::_open_objects() {
+	for (int i = objects_list->get_child_count() - 1; i >= 0; i--) {
+		memdelete(objects_list->get_child(i));
+	}
+	if (_get_root()) {
+		_append_objects(_get_root(), 0);
+	} else {
+		_show_message(TTR("Tap More, then New 2D or New 3D to create your first scene."));
+		return;
+	}
+	objects_popup->popup_centered_clamped(Size2(360, 460) * EDSCALE, 0.92);
+}
+
+void EasyModeBar::_select_object(ObjectID p_id) {
+	Node *node = Object::cast_to<Node>(ObjectDB::get_instance(p_id));
+	if (!node || !_get_root() || (node != _get_root() && !_get_root()->is_ancestor_of(node))) {
+		return;
+	}
+	EditorSelection *selection = EditorNode::get_singleton()->get_editor_selection();
+	selection->clear();
+	selection->add_node(node);
+	EditorNode::get_singleton()->edit_node(node);
+	objects_popup->hide();
+	_back_to_scene();
+	_update_state();
+}
+
+void EasyModeBar::_open_properties() {
+	List<Node *> selected = EditorNode::get_singleton()->get_editor_selection()->get_top_selected_node_list();
+	if (selected.is_empty()) {
+		_show_message(TTR("Choose an object from Objects first, then tap Edit."));
+		return;
+	}
+	Node *node = selected.front()->get();
+	Node2D *n2 = Object::cast_to<Node2D>(node);
+	Node3D *n3 = Object::cast_to<Node3D>(node);
+	Control *control = Object::cast_to<Control>(node);
+	if (!n2 && !n3 && !control) {
+		_show_message(TTR("This object has no position or size. Use More > Full editor for advanced settings."));
+		return;
+	}
+	Vector3 pos;
+	Vector3 scale;
+	if (n3) {
+		pos = n3->get_position();
+		scale = n3->get_scale();
+	} else {
+		Vector2 p = n2 ? n2->get_position() : control->get_position();
+		Vector2 s = n2 ? n2->get_scale() : control->get_scale();
+		pos = Vector3(p.x, p.y, 0);
+		scale = Vector3(s.x, s.y, 1);
+	}
+	property_target = node->get_instance_id();
+	property_root = _get_root()->get_instance_id();
+	properties_dialog->set_title(vformat(TTR("Edit %s"), node->get_name()));
+	for (int i = 0; i < 3; i++) {
+		position_fields[i]->set_value(pos[i]);
+		scale_fields[i]->set_value(scale[i]);
+		Object::cast_to<Control>(position_fields[i]->get_parent())->set_visible(i < 2 || n3);
+	}
+	properties_dialog->popup_centered_clamped(Size2(360, 320) * EDSCALE, 0.92);
+}
+
+void EasyModeBar::_apply_properties() {
+	Node *node = Object::cast_to<Node>(ObjectDB::get_instance(property_target));
+	Node *root = _get_root();
+	if (!node || !root || root->get_instance_id() != property_root || (node != root && !root->is_ancestor_of(node))) {
+		return;
+	}
+	Vector3 pos;
+	Vector3 scale;
+	for (int i = 0; i < 3; i++) {
+		pos[i] = position_fields[i]->get_value();
+		scale[i] = scale_fields[i]->get_value();
+	}
+	EditorUndoRedoManager *ur = EditorUndoRedoManager::get_singleton();
+	ur->create_action(TTR("Edit Object"), UndoRedo::MERGE_DISABLE, node);
+	ur->add_undo_property(node, "position", node->get("position"));
+	ur->add_undo_property(node, "scale", node->get("scale"));
+	if (Object::cast_to<Node3D>(node)) {
+		ur->add_do_property(node, "position", pos);
+		ur->add_do_property(node, "scale", scale);
+	} else {
+		ur->add_do_property(node, "position", Vector2(pos.x, pos.y));
+		ur->add_do_property(node, "scale", Vector2(scale.x, scale.y));
+	}
+	ur->commit_action();
+}
+
+void EasyModeBar::_request_delete() {
+	delete_dialog->popup_centered_clamped(Size2(320, 160) * EDSCALE, 0.9);
 }
 
 bool EasyModeBar::_is_3d_scene() const {
@@ -432,9 +574,15 @@ void EasyModeBar::_update_state() {
 	const bool has_scene = root != nullptr;
 	add_button->set_disabled(!has_scene);
 	code_button->set_disabled(!has_scene);
-	delete_button->set_disabled(!has_scene);
+	const bool has_selection = !EditorNode::get_singleton()->get_editor_selection()->get_top_selected_node_list().is_empty();
+	delete_button->set_disabled(!has_selection);
+	properties_button->set_disabled(!has_selection);
+	objects_button->set_disabled(!has_scene);
 	save_button->set_disabled(!has_scene);
-	play_button->set_disabled(!has_scene);
+	const bool playing = EditorRunBar::get_singleton()->is_playing();
+	play_button->set_disabled(!has_scene && !playing);
+	play_button->set_text(playing ? TTR("Stop") : TTR("Play"));
+	play_button->set_button_icon(get_editor_theme_icon(playing ? SNAME("Stop") : SNAME("Play")));
 
 	bool has_player = false;
 	if (has_scene) {
@@ -449,13 +597,14 @@ void EasyModeBar::_update_state() {
 
 	String hint;
 	if (!has_scene) {
-		hint = TTR("Step 1: Tap \"New 2D\" or \"New 3D\" to start a new game.");
+		hint = TTR("START HERE: More > New 2D or New 3D");
 	} else if (!has_player) {
 		hint = TTR("Step 2: Tap \"Add\" and pick a Player. Then add Ground, Boxes and Coins.");
 	} else if (root->get_scene_file_path().is_empty()) {
 		hint = TTR("Step 3: Tap \"Play\" to try your game! (It is saved automatically.)");
 	} else {
-		hint = TTR("Tip: Select an object and tap \"Code\" to change how it behaves.");
+		List<Node *> selection = EditorNode::get_singleton()->get_editor_selection()->get_top_selected_node_list();
+		hint = selection.is_empty() ? TTR("Objects: select  |  More: edit, code, save") : vformat(TTR("%s selected  |  More > Edit or Code"), selection.front()->get()->get_name());
 	}
 	if (hint_label->get_text() != hint) {
 		hint_label->set_text(hint);
@@ -466,6 +615,7 @@ void EasyModeBar::_set_collapsed(bool p_collapsed) {
 	collapsed = p_collapsed;
 	main_vb->set_visible(!collapsed);
 	show_button->set_visible(collapsed);
+	_sync_layout();
 	if (!collapsed) {
 		_update_state();
 	}
@@ -1023,6 +1173,10 @@ void EasyModeBar::_save() {
 }
 
 void EasyModeBar::_play() {
+	if (EditorRunBar::get_singleton()->is_playing()) {
+		EditorRunBar::get_singleton()->stop_playing();
+		return;
+	}
 	if (!_get_root()) {
 		return;
 	}
@@ -1042,11 +1196,13 @@ void EasyModeBar::_notification(int p_what) {
 		} break;
 		case NOTIFICATION_READY: {
 			set_process(true);
+			callable_mp(this, &EasyModeBar::_sync_layout).call_deferred();
 			_update_state();
 		} break;
 		case NOTIFICATION_PROCESS: {
 			// Cheap: only updates a label and a few disabled flags.
 			if (Engine::get_singleton()->get_process_frames() % 20 == 0) {
+				_sync_layout();
 				_update_state();
 			}
 		} break;
@@ -1077,35 +1233,54 @@ EasyModeBar::EasyModeBar() {
 	hint_label->set_focus_mode(FOCUS_NONE);
 	vb->add_child(hint_label);
 
-	ScrollContainer *scroll = memnew(ScrollContainer);
-	scroll->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_SHOW_NEVER);
-	scroll->set_vertical_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
-	scroll->set_h_size_flags(SIZE_EXPAND_FILL);
-	vb->add_child(scroll);
+	HBoxContainer *nav = memnew(HBoxContainer);
+	nav->set_h_size_flags(SIZE_EXPAND_FILL);
+	vb->add_child(nav);
+	buttons_box = nav;
+	_make_button(TTR("Scene"), SNAME("Node2D"), callable_mp(this, &EasyModeBar::_back_to_scene));
+	objects_button = _make_button(TTR("Objects"), SNAME("Node"), callable_mp(this, &EasyModeBar::_open_objects));
+	add_button = _make_button(TTR("Add"), SNAME("Add"), callable_mp(this, &EasyModeBar::_open_add_popup));
+	play_button = _make_button(TTR("Play"), SNAME("Play"), callable_mp(this, &EasyModeBar::_play));
+	_make_button(TTR("More"), SNAME("GuiTabMenuHl"), callable_mp(this, &EasyModeBar::_open_more));
 
-	buttons_box = memnew(HBoxContainer);
-	buttons_box->set_h_size_flags(SIZE_EXPAND_FILL);
-	buttons_box->set_alignment(BoxContainer::ALIGNMENT_CENTER);
-	scroll->add_child(buttons_box);
-
+	more_popup = memnew(PopupPanel);
+	add_child(more_popup);
+	VBoxContainer *more_vb = memnew(VBoxContainer);
+	more_popup->add_child(more_vb);
+	Label *more_title = memnew(Label);
+	more_title->set_text(TTR("MAKE IT YOURS"));
+	more_title->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+	more_vb->add_child(more_title);
+	ScrollContainer *more_scroll = memnew(ScrollContainer);
+	more_scroll->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
+	more_scroll->set_v_size_flags(SIZE_EXPAND_FILL);
+	more_vb->add_child(more_scroll);
+	GridContainer *more_grid = memnew(GridContainer);
+	more_grid->set_columns(3);
+	more_grid->set_h_size_flags(SIZE_EXPAND_FILL);
+	more_scroll->add_child(more_grid);
+	buttons_box = more_grid;
 	new_2d_button = _make_button(TTR("New 2D"), SNAME("Node2D"), callable_mp(this, &EasyModeBar::_new_game).bind(false));
 	new_3d_button = _make_button(TTR("New 3D"), SNAME("Node3D"), callable_mp(this, &EasyModeBar::_new_game).bind(true));
-	add_button = _make_button(TTR("Add"), SNAME("Add"), callable_mp(this, &EasyModeBar::_open_add_popup));
+	properties_button = _make_button(TTR("Edit"), SNAME("Edit"), callable_mp(this, &EasyModeBar::_open_properties));
 	code_button = _make_button(TTR("Code"), SNAME("Script"), callable_mp(this, &EasyModeBar::_open_code));
-	delete_button = _make_button(TTR("Delete"), SNAME("Remove"), callable_mp(this, &EasyModeBar::_delete_selected));
+	delete_button = _make_button(TTR("Delete"), SNAME("Remove"), callable_mp(this, &EasyModeBar::_request_delete));
 	undo_button = _make_button(TTR("Undo"), SNAME("UndoRedo"), callable_mp(this, &EasyModeBar::_undo));
 	redo_button = _make_button(TTR("Redo"), SNAME("Redo"), callable_mp(this, &EasyModeBar::_redo));
 	save_button = _make_button(TTR("Save"), SNAME("Save"), callable_mp(this, &EasyModeBar::_save));
-	play_button = _make_button(TTR("Play"), SNAME("Play"), callable_mp(this, &EasyModeBar::_play));
 	help_button = _make_button(TTR("Help"), SNAME("Help"), callable_mp(this, &EasyModeBar::_show_help));
-	hide_button = _make_button(TTR("Hide"), SNAME("GuiVisibilityHidden"), callable_mp(this, &EasyModeBar::_set_collapsed).bind(true));
+	hide_button = _make_button(TTR("Full editor"), SNAME("GuiVisibilityHidden"), callable_mp(this, &EasyModeBar::_set_collapsed).bind(true));
+	for (int i = 0; i < more_grid->get_child_count(); i++) {
+		Button *b = Object::cast_to<Button>(more_grid->get_child(i));
+		b->connect(SceneStringName(pressed), callable_mp((Window *)more_popup, &Window::hide));
+	}
 
 	add_button->set_tooltip_text(TTR("Add an object (player, ground, box, coin...) to your game."));
 	code_button->set_tooltip_text(TTR("Write code for the selected object."));
 	play_button->set_tooltip_text(TTR("Save and play your game."));
 
 	show_button = memnew(Button);
-	show_button->set_text(TTR("Show Easy Mode buttons"));
+	show_button->set_text(TTR("Back to mobile workspace"));
 	show_button->set_flat(false);
 	show_button->set_focus_mode(FOCUS_NONE);
 	show_button->set_visible(false);
@@ -1131,18 +1306,95 @@ EasyModeBar::EasyModeBar() {
 	add_list->set_h_size_flags(SIZE_EXPAND_FILL);
 	popup_scroll->add_child(add_list);
 
+	Button *close_add = memnew(Button);
+	close_add->set_text(TTR("Back to scene"));
+	close_add->set_custom_minimum_size(Size2(0, 48) * EDSCALE);
+	close_add->connect(SceneStringName(pressed), callable_mp((Window *)add_popup, &Window::hide));
+	popup_vb->add_child(close_add);
+
+	objects_popup = memnew(PopupPanel);
+	add_child(objects_popup);
+	VBoxContainer *objects_vb = memnew(VBoxContainer);
+	objects_popup->add_child(objects_vb);
+	Label *objects_title = memnew(Label);
+	objects_title->set_text(TTR("YOUR OBJECTS - tap to select"));
+	objects_title->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+	objects_vb->add_child(objects_title);
+	ScrollContainer *objects_scroll = memnew(ScrollContainer);
+	objects_scroll->set_v_size_flags(SIZE_EXPAND_FILL);
+	objects_scroll->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
+	objects_vb->add_child(objects_scroll);
+	objects_list = memnew(VBoxContainer);
+	objects_list->set_h_size_flags(SIZE_EXPAND_FILL);
+	objects_scroll->add_child(objects_list);
+	Button *close_objects = memnew(Button);
+	close_objects->set_text(TTR("Back to scene"));
+	close_objects->set_custom_minimum_size(Size2(0, 48) * EDSCALE);
+	close_objects->connect(SceneStringName(pressed), callable_mp((Window *)objects_popup, &Window::hide));
+	objects_vb->add_child(close_objects);
+
+	properties_dialog = memnew(ConfirmationDialog);
+	properties_dialog->set_ok_button_text(TTR("Apply changes"));
+	properties_dialog->connect(SceneStringName(confirmed), callable_mp(this, &EasyModeBar::_apply_properties));
+	add_child(properties_dialog);
+	VBoxContainer *fields = memnew(VBoxContainer);
+	properties_dialog->add_child(fields);
+	Label *fields_hint = memnew(Label);
+	fields_hint->set_text(TTR("Position moves your object. Size 1 = original."));
+	fields_hint->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
+	fields->add_child(fields_hint);
+	HBoxContainer *field_headers = memnew(HBoxContainer);
+	fields->add_child(field_headers);
+	for (const String &text : { TTR("Position"), TTR("Size multiplier") }) {
+		Label *label = memnew(Label);
+		label->set_text(text);
+		label->set_h_size_flags(SIZE_EXPAND_FILL);
+		label->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+		field_headers->add_child(label);
+	}
+	for (int i = 0; i < 3; i++) {
+		HBoxContainer *row = memnew(HBoxContainer);
+		fields->add_child(row);
+		Label *axis = memnew(Label);
+		axis->set_text(i == 0 ? "X" : i == 1 ? "Y" : "Z");
+		row->add_child(axis);
+		for (int j = 0; j < 2; j++) {
+			SpinBox *field = memnew(SpinBox);
+			field->set_min(j == 0 ? -100000 : 0.01);
+			field->set_max(j == 0 ? 100000 : 1000);
+			field->set_step(0.01);
+			field->set_h_size_flags(SIZE_EXPAND_FILL);
+			field->set_custom_minimum_size(Size2(0, 48) * EDSCALE);
+			field->get_line_edit()->add_theme_font_size_override(SceneStringName(font_size), 16 * EDSCALE);
+			field->set_tooltip_text(j == 0 ? TTR("Position") : TTR("Size multiplier"));
+			row->add_child(field);
+			if (j == 0) {
+				position_fields[i] = field;
+			} else {
+				scale_fields[i] = field;
+			}
+		}
+	}
+	delete_dialog = memnew(ConfirmationDialog);
+	delete_dialog->set_title(TTR("Delete selected objects?"));
+	delete_dialog->set_text(TTR("Remove the selected objects from this scene? You can Undo this."));
+	delete_dialog->set_ok_button_text(TTR("Delete"));
+	delete_dialog->connect(SceneStringName(confirmed), callable_mp(this, &EasyModeBar::_delete_selected));
+	add_child(delete_dialog);
+
 	// Help.
 	help_dialog = memnew(AcceptDialog);
 	help_dialog->set_title(TTR("How to make a game (Easy Mode)"));
 	help_dialog->set_autowrap(true);
 	help_dialog->set_text(TTR(
-			"1. Tap \"New 2D\" (flat game) or \"New 3D\" (3D world).\n"
+			"1. Tap More > New 2D (flat game) or New 3D (3D world).\n"
 			"2. Tap \"Add\" and choose \"Player\". Add Ground, Boxes and Coins too.\n"
 			"3. Tap \"Play\" to try your game. It is saved automatically.\n"
 			"4. Tap an object to select it. Drag it with your finger to move it.\n"
-			"   Its settings (size, color, speed...) are in the Inspector panel.\n"
-			"5. Select an object and tap \"Code\" to open its script and change how it behaves.\n"
-			"6. Made a mistake? Tap \"Undo\".\n\n"
+			"   Or tap Objects to choose it from a large, scrollable list.\n"
+			"5. More > Edit changes position and size. More > Code opens its script.\n"
+			"6. More > Undo fixes mistakes. Scene returns to your canvas.\n"
+			"7. More > Full editor opens advanced tools and project settings.\n\n"
 			"Controls in your game on the phone:\n"
 			"- 2D jumping game: touch left / right side to walk, middle to jump.\n"
 			"- 2D top-down game: hold your finger where the player should walk.\n"

@@ -452,6 +452,10 @@ private:
 	ConfirmationDialog *disk_changed = nullptr;
 	ConfirmationDialog *project_data_missing = nullptr;
 
+	bool easy_workspace = false;
+	bool easy_previous_distraction = false;
+	bool easy_previous_title = true;
+	bool easy_previous_tabs = true;
 	bool scene_distraction_free = false;
 	bool script_distraction_free = false;
 
@@ -839,6 +843,7 @@ public:
 
 	void update_distraction_free_mode();
 	void set_distraction_free_mode(bool p_enter);
+	void set_easy_workspace(bool p_enabled);
 	bool is_distraction_free_mode_enabled() const;
 	void update_distraction_free_button_theme();
 
