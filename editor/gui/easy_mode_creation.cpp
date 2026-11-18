@@ -1,6 +1,7 @@
 #include "easy_mode_bar.h"
 #include "easy_logic_editor.h"
 #include "easy_map_canvas.h"
+#include "core/object/callable_mp.h"
 #include "editor/editor_node.h"
 #include "editor/editor_data.h"
 #include "editor/editor_undo_redo_manager.h"
@@ -82,6 +83,7 @@ void EasyModeBar::_apply_map() {
 	if (!root || root->get_instance_id() != map_root) { _show_message(TTR("Scene changed. Reopen Map.")); return; }
 	Dictionary cells = map_canvas->get_cells();
 	const bool spatial = _is_3d_scene();
+	map_cell_size->apply();
 	const real_t size = map_cell_size->get_value();
 	Node *map = spatial ? static_cast<Node *>(memnew(Node3D)) : static_cast<Node *>(memnew(Node2D));
 	map->set_name("PaintedMap");

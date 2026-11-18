@@ -1,45 +1,78 @@
-# Godot Easy Mode (mobile + beginner friendly)
+# Godot Mobile — Easy Mode
 
-Is fork mein Godot editor ke neeche ek **badi buttons wali "Easy Mode" bar** hai.
-Phone / tablet par yeh apne aap ON hoti hai. Har zaroori kaam ek tap mein:
+Phone par canvas-first workspace: **Scene · Objects · Add · Play/Stop · More**.
+More mein New 2D, New 3D, Map, Blocks, Edit, Duplicate, Delete, Undo/Redo, Save aur Help hain.
+Full editor se advanced Godot features milte hain; Back to mobile workspace se wapas aayen.
 
-| Button  | Kya karta hai |
-|---------|---------------|
-| New 2D  | Naya 2D game (zameen/ground ke saath) bana deta hai |
-| New 3D  | Naya 3D world (sky, sun, camera, floor ke saath) bana deta hai |
-| Add     | Badi list kholta hai: Player, Ground, Box, Coin, Text, Picture, Camera, Lamp... |
-| Code    | Select kiye object ka code kholta hai. Code nahi hai to ek simple starter script bana deta hai (koi dialog nahi) |
-| Delete  | Select kiya object hata deta hai |
-| Undo / Redo | Galti theek karo |
-| Save    | Bina file-dialog ke save karta hai (pehla scene "main scene" ban jata hai) |
-| Play    | Save karke game chala deta hai |
-| Help    | Step-by-step guide |
-| Hide    | Bar ko chhota kar deta hai ("Show Easy Mode buttons" se wapas) |
+## 1. Jaldi level banayein
 
-"Player" pehle se chalne wale code ke saath aata hai, phone par touch se chalta hai:
+1. **More → New 2D / New 3D**: nayi scene aur Map builder khulega.
+2. Platform layout / Room layout chunen, ya khud grid par paint karein.
+3. Brush: Ground, Wall, Player, Coin, Box; Eraser se cell saaf karein.
+4. Ungli se paint karein; scrollbars se map ke doosre hisse tak jayein.
+5. **Build map → Play**. Collision, child nodes, ownership aur player scripts automatically bante hain.
 
-* **2D jumping game:** screen ka left/right hissa = chalo, beech = jump
-* **2D top-down:** ungli jahan rakho player wahan jaata hai
-* **3D:** left half par ungli slide = joystick, right half tap = jump
+2D map X/Y plane par hai; 3D map upar se X/Z plane par dikhta hai.
+Map abhi 24 × 16 cells ka hai. Cell size 2D mein normally 64 pixels aur 3D mein 2 meters hai.
+Objects menu se created objects chun kar Edit se position/size badal sakte hain.
+Duplicate selected objects ki copy ko 2D mein 64 pixels / 3D mein 2 meters side mein rakhta hai.
 
-Scripts `res://scripts/` mein bante hain, unhe kholkar numbers (speed, jump) badal sakte ho.
+**Rebuild note:** Map builder `PaintedMap` ko regenerate karta hai. Iske andar manually badle transforms,
+blocks ya added objects agle rebuild par replace honge. Scene ke doosre objects preserve hote hain.
+Map layout pehle finalize karein, phir object logic lagayein. Undo purana map restore karta hai.
+Existing scenes ka automatic grid conversion abhi nahi hota.
 
-Easy Mode band/chalu: **Editor Settings → Interface → Easy Mode → Enabled**.
+## 2. Bina code behavior banayein
 
-## APK apne aap kaise banta hai
+1. **Objects** se object select karein (kuch select nahi hai to scene root use hoga).
+2. **More → Blocks → + Block**.
+3. WHEN event, phir action blocks add karein. Block tap karke edit; arrows se reorder; × se remove.
+4. **Apply blocks**, phir **Save / Play**.
 
-1. Is code ko apne GitHub repo mein push karo.
-2. Har push par workflow **"📱 Build Android Editor APK (Easy Mode)"** chalta hai
-   (`.github/workflows/easy_android_apk.yml`). Pehli baar ~1.5–3 ghante, baad mein cache se tez.
-3. APK milega:
-   * **Actions** tab → latest run → *Artifacts* → `godot-easy-mode-apk`, ya
-   * **Releases** → `Godot Easy Mode APK (latest)` (sirf default branch par).
-4. Phone par `.apk` install karo ("Install unknown apps" allow karo).
+### Available blocks
 
-APK debug key se signed hai. Apni release key use karni ho to repo secrets mein keystore daal kar
-`GODOT_ANDROID_SIGN_KEYSTORE`, `GODOT_ANDROID_KEYSTORE_ALIAS`, `GODOT_ANDROID_SIGN_PASSWORD` env set karo.
+- Events: game start, every physics frame, screen tap, body entered, repeating timer.
+- Logic: IF variable >= / < value, ELSE, REPEAT (1–100), END.
+- Input / physics: IF input held, IF on floor, velocity, jump, gravity, move and slide.
+- Transform: move, move per second, rotate, set position (2D aur 3D).
+- State: set/add shared numeric variable, show/hide, delete.
+- Content: label text, sound/animation, spawn saved scene, change/reload scene.
+- Numeric property: existing property ka value set karein, jaise player ka speed.
 
-Purana bada multi-platform CI (`runner.yml`) ab sirf haath se (workflow_dispatch) chalta hai,
-taaki har push par sirf APK bane aur GitHub minutes bachein.
+Har IF / REPEAT ko END se close karein. Nested sections supported hain.
+Variable names scene-wide hain; missing variables zero se start hote hain.
+Body entered ke liye selected target par `body_entered` signal hona chahiye (normally Area2D/3D).
+Scene load/spawn blocks mein saved `.tscn` ka `res://` path chahiye.
 
-Code: `editor/gui/easy_mode_bar.cpp/.h`, editor mein jodne ki line `editor/editor_node.cpp` mein.
+### Example: tap par score
+
+- WHEN screen tapped
+- Add to variable: text `score`, X `1`
+- IF variable >= number: text `score`, X `10`
+- Set label text: target apna Label, text `You win!`
+- END section
+
+Move preset aur Tap score buttons independent example events append karte hain.
+Existing object scripts replace nahi hote: behavior ek `LogicBlocks` child aur embedded GDScript mein save hota hai.
+Block data scene metadata mein rehta hai; Apply Undo/Redo supported hai.
+Ready-made player par extra movement/physics blocks uske movement script se conflict kar sakte hain;
+custom physics ke liye unscripted CharacterBody use karein.
+
+Yeh structured, tap-to-add block editor ka pehla version hai. Scratch-style drag connectors,
+custom functions, arbitrary expressions, multiplayer blocks aur har Godot API ka block abhi available nahi hai.
+Map builder level layout ke liye hai; Blender-style mesh modeling / terrain sculpting nahi hai.
+
+## Player touch controls
+
+- 2D platformer: left/right screen = walk, middle = jump.
+- 2D top-down: finger ki taraf walk.
+- 3D: left half slide = movement, right half tap = jump.
+
+## Verification and APK
+
+Runtime regression test: `python3 misc/easy_mode_tests/run.py /path/to/godot`.
+Tests cover movement, variables, visibility, labels, physics, collision/timer callbacks and scene persistence.
+
+Push to `main` triggers `.github/workflows/easy_android_apk.yml` on GitHub Actions.
+Latest APK: repository Releases → `easy-apk-latest`.
+Editor settings: Interface → Easy Mode → Enabled.

@@ -1,5 +1,6 @@
 #include "easy_logic_editor.h"
 
+#include "core/object/callable_mp.h"
 #include "core/object/script_language.h"
 #include "editor/editor_node.h"
 #include "editor/editor_data.h"
@@ -132,6 +133,7 @@ void EasyLogicEditor::_operation_changed(int p_index) {
 }
 
 void EasyLogicEditor::_store_block() {
+	for (SpinBox *number : numbers) { number->apply(); }
 	Dictionary d;
 	d["op"] = operation->get_selected();
 	d["text"] = text->get_text();
@@ -204,7 +206,7 @@ String EasyLogicEditor::_compile(String &r_error) const {
 	String source = "extends Node\n# Generated from Easy Mode blocks. Edit using the Blocks button.\n";
 	source += "\nfunc _ready():\n\tpass\n" + ready;
 	source += "\nfunc _physics_process(delta):\n\tpass\n" + physics;
-	source += "\nfunc _unhandled_input(event):\n\tif (event is InputEventScreenTouch and event.pressed) or (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):\n\t\tpass\n" + input;
+	source += "\nfunc _unhandled_input(event):\n\tif (event is InputEventScreenTouch and event.pressed) or (event is InputEventMouseButton and event.device != -1 and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):\n\t\tpass\n" + input;
 	return source + functions + R"GD(
 func _target(path):
 	return get_parent().get_node_or_null(NodePath(path))
