@@ -1,7 +1,8 @@
 # Godot Mobile — Easy Mode
 
-Phone par canvas-first workspace: **Scene · Objects · Add · Play/Stop · More**.
-More mein New 2D, New 3D, Map, Blocks, Edit, Duplicate, Delete, Undo/Redo, Save aur Help hain.
+Phone par beginner workspace: **Home · Map · Logic · Play/Stop · Tools**.
+Home mein Jump & Collect, Explore a Room aur My First 3D World starters hain.
+Tools mein New 2D, New 3D, Objects, Add object, Canvas, Edit, Duplicate, Delete, Undo/Redo, Save aur Help hain.
 Full editor se advanced Godot features milte hain; Back to mobile workspace se wapas aayen.
 
 ## 1. Jaldi level banayein
@@ -24,10 +25,14 @@ Existing scenes ka automatic grid conversion abhi nahi hota.
 
 ## 2. Bina code behavior banayein
 
-1. **Objects** se object select karein (kuch select nahi hai to scene root use hoga).
-2. **More → Blocks → + Block**.
-3. WHEN event, phir action blocks add karein. Block tap karke edit; arrows se reorder; × se remove.
-4. **Apply blocks**, phir **Save / Play**.
+1. **Logic** tap karein aur object choose karein.
+2. Rang-wise drawer: Events, Control, Movement, Variables, Looks / Sound, Scenes.
+3. Puzzle block ko workspace ke **+ slot** par drag karein. Phone par **+ slot tap → block tap** bhi supported hai.
+4. Placed block tap karke relevant values edit karein; isi dialog se block/section delete karein.
+5. IF/REPEAT aur events apne children ke saath move/delete hote hain. Invalid connections reject hote hain.
+6. Workspace Undo/Redo se block edits reverse karein. **Apply blocks**, phir **Tools → Save / Play**.
+
+Drawer ko hide karke workspace ke liye zyada jagah milegi. Existing scene block data supported hai.
 
 ### Available blocks
 
@@ -39,7 +44,7 @@ Existing scenes ka automatic grid conversion abhi nahi hota.
 - Content: label text, sound/animation, spawn saved scene, change/reload scene.
 - Numeric property: existing property ka value set karein, jaise player ka speed.
 
-Har IF / REPEAT ko END se close karein. Nested sections supported hain.
+IF / REPEAT ka END automatically add hota hai. Nested sections supported hain.
 Variable names scene-wide hain; missing variables zero se start hote hain.
 Body entered ke liye selected target par `body_entered` signal hona chahiye (normally Area2D/3D).
 Scene load/spawn blocks mein saved `.tscn` ka `res://` path chahiye.
@@ -58,8 +63,9 @@ Block data scene metadata mein rehta hai; Apply Undo/Redo supported hai.
 Ready-made player par extra movement/physics blocks uske movement script se conflict kar sakte hain;
 custom physics ke liye unscripted CharacterBody use karein.
 
-Yeh structured, tap-to-add block editor ka pehla version hai. Scratch-style drag connectors,
-custom functions, arbitrary expressions, multiplayer blocks aur har Godot API ka block abhi available nahi hai.
+Yeh App Inventor-inspired category drawer aur structured snap-slot workspace hai; MIT App Inventor/Blockly engine ka port nahi hai.
+Free-position canvas, expression/value blocks ko sockets mein drag karna, custom functions,
+multiplayer blocks aur har Godot API ka block abhi available nahi hai.
 Map builder level layout ke liye hai; Blender-style mesh modeling / terrain sculpting nahi hai.
 
 ## Player touch controls
